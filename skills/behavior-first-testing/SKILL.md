@@ -170,14 +170,26 @@ For native ESLint/ruff rules, pre-commit, CI, the guard hook and CODEOWNERS: `re
 3. **Get approval.** Show the scenario titles with their Given/When/Then in plain language. Wait for the human.
    If they told you to proceed without review, say that in your report.
 4. **Write the scenario tests and watch them fail.** They must fail because the behavior is missing, not because
-   of a typo, a broken fixture or a missing import. Read the failure message.
+   of a typo, a broken fixture or a missing import. Read the failure message. When the scenarios need a module or
+   endpoint that doesn't exist yet, add an empty stub first (a function that raises, a route that returns 501),
+   so each scenario fails on its own assertion. That failure is the evidence that the test pins the behavior; a
+   file that merely fails to import proves nothing about any single test.
 5. **Implement until green.** Do not edit approved scenarios. Add lower-level tests only where rule 4 allows.
 6. **Run the right tests.** Run the affected tier while iterating, then every tier the change touches. Fix flakiness
-   at its cause (time, ordering, shared data, async waits), never with retries or sleeps.
-7. **Check coverage and explain gaps.** Run branch coverage and `bft.py gaps --changed-since <base>`. Add scenarios for
-   failure paths that matter, and write reasons for the rest.
-8. **Lint.** Run `bft.py lint --changed-since <base>`, and `bft.py red-on-base` when on a branch.
-9. **Report back** in the format below.
+   at its cause (time, ordering, shared data, async waits), never with retries or sleeps. Before the first run,
+   check what the suite will contact: a test that defaults to a live or production URL must be pointed at a
+   test instance, or excluded, before you run anything.
+7. **Finish with the checks, once each.** When the implementation is done, run each of these once. Only rerun one
+   if you change tests afterwards.
+   - branch coverage on the affected tests, then `bft.py gaps --changed-since <base>`: add scenarios for failure
+     paths that matter, and write reasons for the rest;
+   - `bft.py lint --changed-since <base>`;
+   - `bft.py red-on-base` when on a branch.
+8. **Report back** in the format below.
+
+Keep the change to what was asked. Setting up enforcement is a separate task: running `bft.py init`, copying
+`bft.py` into the repository, and adding CI jobs, make targets or hooks. Run `bft.py` from this skill's directory,
+and offer the setup in your report instead of doing it unasked.
 
 Legacy codebases: adopt incrementally. Lint with `--changed-since` so new work follows the rules. Don't rewrite
 old tests wholesale unless asked; fix old tests you touch anyway.
@@ -219,15 +231,13 @@ Allowances added: <file:line, rule, reason>, or "none"
 
 ## Reference files
 
-- `references/scenarios.md`: writing scenarios in pytest, Vitest/Jest, Playwright and Gherkin; the scenario
-  checklist; the approval flow. Read before drafting scenarios.
-- `references/real-dependencies.md`: database and Redis isolation, fakes with contract tests, failure injection,
-  clocks, randomness. Read before creating fixtures or faking anything.
-- `references/e2e-and-tiers.md`: what counts as end-to-end, choosing a test level, tiers, change-based selection,
-  CI layout, flaky tests, silent skips.
-- `references/coverage.md`: branch coverage configuration, the gap report, padding smells, optional mutation
-  testing.
-- `references/enforcement.md`: `bft.py` and its config, native lint configs, pre-commit, GitHub Actions, the
-  guard hook, CODEOWNERS.
-- `references/characterization.md`: pinning a legacy system's behavior with historical data before replacing
-  it: exact comparison, pinned differences with reasons, no tolerances.
+This file is enough to run the workflow and the `bft.py` commands. Read a reference only when the task needs it:
+
+| Read | When |
+|---|---|
+| `references/scenarios.md` | You are writing scenarios. It has the syntax per framework, the checklist of paths to cover, and the approval flow. |
+| `references/real-dependencies.md` | You need a fake, a clock, database isolation or failure injection. |
+| `references/e2e-and-tiers.md` | You are choosing a test level, or setting up tiers, change-based runs or CI. It also covers flaky tests and silent skips. |
+| `references/coverage.md` | You are configuring coverage tools, or the gap report needs interpreting. |
+| `references/enforcement.md` | You are setting up `bft.py`, lint rules, CI or the guard hook in a project. |
+| `references/characterization.md` | You are replacing a legacy system and can compare against its historical outputs. |

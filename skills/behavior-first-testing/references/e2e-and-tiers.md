@@ -120,6 +120,11 @@ def require(condition, why: str) -> None:
 
 When you run tests and a tier could not run, say so in the report. Never count it as passing.
 
+Never let a test default to a live system. A UI test that falls back to `http://localhost:8080` when no URL is
+set will, on the machine that runs production, log in to production during an ordinary `pytest`. It can also
+run while pytest is only collecting tests, if the module checks the server at import time. Require the target to
+be set explicitly for that tier, and treat an unset target as "not configured", not as a default.
+
 ## Flaky tests
 
 A flaky test is a bug in the test or in the code. Retrying until green hides it, and so does adding a sleep.
