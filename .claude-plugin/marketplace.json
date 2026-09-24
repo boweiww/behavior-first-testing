@@ -1,0 +1,15 @@
+{
+  "name": "behavior-first-testing",
+  "description": "Behavior-first testing for business applications, for Claude Code.",
+  "owner": {
+    "name": "Bowei",
+    "url": "https://github.com/boweiww"
+  },
+  "plugins": [
+    {
+      "name": "behavior-first-testing",
+      "source": "./",
+      "description": "Behavior-first testing for business applications: approved Given/When/Then scenarios before code, no mocks, end-to-end by default, explained coverage gaps, and a linter that enforces it."
+    }
+  ]
+}

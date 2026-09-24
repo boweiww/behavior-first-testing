@@ -1,0 +1,80 @@
+# Starting point for .github/workflows/tests.yml. Adjust install steps, services and paths to the project.
+# Assumes bft.py is vendored at tools/bft.py and the backend is a Python app under backend/.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 3 * * *"   # nightly: every tier, including contract tests against sandboxes
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # --changed-since and red-on-base need the base branch
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test rules
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python tools/bft.py lint --changed-since "origin/${{ github.base_ref }}" --format github
+          else
+            python tools/bft.py lint --format github
+          fi
+
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: app_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+    env:
+      CI: "true"   # tests that skip locally when an environment is missing must fail here (see require())
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/app_test
+      REDIS_URL: redis://localhost:6379/15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -e ".[dev]" pytest-cov
+
+      - name: New tests fail on the base branch
+        if: github.event_name == 'pull_request'
+        run: python tools/bft.py red-on-base --base "origin/${{ github.base_ref }}"
+
+      - name: Tests (fast tier on pull requests, everything but contracts on main, everything nightly)
+        working-directory: backend
+        run: |
+          case "${{ github.event_name }}" in
+            pull_request) MARKERS="not ui and not slow and not contract" ;;
+            push)         MARKERS="not contract" ;;
+            *)            MARKERS="" ;;
+          esac
+          .venv/bin/python -m pytest ${MARKERS:+-m "$MARKERS"} --cov --cov-branch --cov-report=xml
+
+      - name: Coverage gaps
+        if: always()
+        run: |
+          BASE="${{ github.base_ref && format('origin/{0}', github.base_ref) || '' }}"
+          python tools/bft.py gaps backend/coverage.xml ${BASE:+--changed-since "$BASE"} --fail-under 90 \
+            >> "$GITHUB_STEP_SUMMARY"

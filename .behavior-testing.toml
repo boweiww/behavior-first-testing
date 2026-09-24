@@ -1,0 +1,11 @@
+# This repository checks its own tests with its own rules.
+actors = ["user"]
+scenario_globs = ["tests/**"]
+
+[red_on_base]
+base = "origin/main"
+
+[red_on_base.runners.tests]
+globs = ["tests/**"]
+cwd = "."
+command = "python3 -m pytest {files} -q -p no:cacheprovider --junitxml={junit}"
