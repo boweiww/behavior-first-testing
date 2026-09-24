@@ -483,6 +483,8 @@ def actor_ok(t: TestCase, kind: str, actors: List[str]) -> bool:
 MOCK_MODULES = ("unittest.mock", "mock", "pytest_mock", "asynctest", "flexmock", "doublex")
 HTTP_STUB_MODULES = ("responses", "respx", "requests_mock", "httpretty", "aioresponses", "pook")
 HTTP_STUB_CALLS = {"httpx.MockTransport"}
+MONKEYPATCH_MAKERS = {"pytest.MonkeyPatch", "_pytest.monkeypatch.MonkeyPatch",
+                      "pytest.MonkeyPatch.context", "_pytest.monkeypatch.MonkeyPatch.context"}
 SLEEPS = {"time.sleep"}
 ASYNC_SLEEPS = {"asyncio.sleep", "trio.sleep", "anyio.sleep", "gevent.sleep"}
 CLOCKS = {
@@ -558,6 +560,16 @@ def check_py(rel: str, text: str, lines: List[str], scenario: bool, actors: List
         return []
     resolve = _Resolver(tree)
     out: List[Violation] = []
+    patchers = {"monkeypatch"}  # the fixture, plus names bound to a MonkeyPatch the test creates itself
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call) \
+                and resolve(node.value.func) in MONKEYPATCH_MAKERS:
+            patchers.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if isinstance(item.context_expr, ast.Call) and isinstance(item.optional_vars, ast.Name) \
+                        and resolve(item.context_expr.func) in MONKEYPATCH_MAKERS:
+                    patchers.add(item.optional_vars.id)
 
     def add(line: int, rule: str, key: str, what: str = "") -> None:
         out.append(Violation(rel, line, rule, MSG[key].format(what)))
@@ -587,7 +599,8 @@ def check_py(rel: str, text: str, lines: List[str], scenario: bool, actors: List
                 add(node.lineno, "BFT003", "clock", q)
             elif q in HTTP_STUB_CALLS:
                 add(node.lineno, "BFT001", "http", q)
-            elif q.endswith("monkeypatch.setattr") or q.endswith("monkeypatch.delattr"):
+            elif (isinstance(node.func, ast.Attribute) and node.func.attr in ("setattr", "delattr")
+                  and isinstance(node.func.value, ast.Name) and node.func.value.id in patchers):
                 target = ast.unparse(node.args[0]) if node.args and hasattr(ast, "unparse") else "an attribute"
                 add(node.lineno, "BFT001", "patch", target)
             elif q in SKIPS or q.endswith(".skipTest"):

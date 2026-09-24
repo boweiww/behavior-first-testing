@@ -74,6 +74,36 @@ def test_user_is_told_when_a_test_mocks_a_dependency(repo):
     assert "patches `'app.gateway.charge'`" in result.stdout
 
 
+def test_user_is_told_when_a_test_patches_through_its_own_monkeypatch_instance(repo):
+    """
+    Given fixtures that create pytest.MonkeyPatch directly, as a variable and as a context manager
+    When the user runs the lint
+    Then both setattr calls are BFT001, while setenv through the same instance is left alone
+    """
+    repo.write("tests/conftest.py", """
+        import pytest
+
+        @pytest.fixture(scope="session")
+        def pinned():
+            mp = pytest.MonkeyPatch()
+            mp.setattr("app.clock.now", lambda: 0)
+            mp.setenv("TZ", "UTC")
+            yield
+            mp.undo()
+
+        @pytest.fixture
+        def other():
+            with pytest.MonkeyPatch.context() as patcher:
+                patcher.setattr("app.sms.send", print)
+                yield
+    """)
+
+    result = repo.bft("lint")
+
+    assert rules_reported(result) == ["BFT001", "BFT001"]
+    assert "patches `'app.clock.now'`" in result.stdout
+
+
 def test_user_is_told_when_a_test_stubs_http_with_an_httpx_transport(repo):
     """
     Given a test that answers HTTP calls with httpx's MockTransport, imported both ways
