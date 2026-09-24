@@ -24,7 +24,7 @@ install. Update the copy deliberately, like any other pinned tool.
 |---|---|---|
 | `lint [PATH...] [--changed-since REF] [--format github]` | Checks BFT001–BFT008 | 1 on any problem |
 | `scenarios [PATH...]` | Prints scenarios as Markdown with Given/When/Then | 0 |
-| `red-on-base [--base REF] [--command CMD] [--allow-not-run]` | Runs new tests against the base branch in a temporary git worktree; each must fail | 1 if one passes (BFT010) or could not run |
+| `red-on-base [--base REF] [--command CMD] [--link PATH] [--allow-not-run]` | Runs new tests against the base branch in a temporary git worktree; each must fail | 1 if one passes (BFT010) or could not run |
 | `gaps COVERAGE_XML [--changed-since REF] [--fail-under PCT]` | Prints the coverage-gap table | 1 when under the bar |
 | `guard` | Claude Code PreToolUse hook (event on stdin) | 2 blocks the edit |
 | `init [--force]` | Writes a starter config with detected test runners | 0 |
@@ -39,10 +39,11 @@ fixed when touched.
 1. It finds test files changed since the merge-base, and within them, the tests that did not exist at the
    merge-base.
 2. It checks out the merge-base in a temporary `git worktree`, copies the changed test and support files in, and
-   symlinks `.venv`, `venv` and `node_modules` directories (and anything listed in `link`) from your checkout.
+   symlinks `.venv`, `venv` and `node_modules` directories from your checkout. Ignored files the tests need, such
+   as `.env`, are not there; lend them with `--link .env` or list them in `link`.
 3. It runs each runner's command on the new test files and reads the JUnit XML it writes.
-4. A test for the new behavior must fail there. A file that cannot load on base (it imports something the branch
-   adds) counts as failing. A test that passes is reported as BFT010, unless an allowance marks it as a guard:
+4. A test for the new behavior must fail there. A test file or a `conftest.py` that cannot load on base (it
+   imports something the branch adds) counts as failing, but that is weak evidence; see step 4 of the workflow. A test that passes is reported as BFT010, unless an allowance marks it as a guard:
    an exception or boundary of the new rule, or a characterization test. A test that could not run fails the
    check too, unless `--allow-not-run` is given.
 

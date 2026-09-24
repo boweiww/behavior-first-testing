@@ -534,6 +534,54 @@ def test_user_sees_new_tests_in_a_file_that_cannot_load_on_base_as_red(repo):
     assert "NOT RUN" not in result.stdout
 
 
+def test_user_sees_new_tests_whose_shared_setup_cannot_load_on_base_as_red(repo):
+    """
+    Given a branch that adds a module, a conftest fixture importing it, and a new test using that fixture
+    When the user runs red-on-base
+    Then pytest cannot load the setup on the base branch, which counts as red, not as "not run"
+    """
+    pricing_repo(repo)
+    repo.write("clock.py", "def today():\n    return '2026-09-19'\n")
+    repo.write("tests/conftest.py", """
+        import pytest
+        from clock import today
+
+        @pytest.fixture
+        def shop_today():
+            return today()
+    """)
+    with open(repo.root / "tests/test_price.py", "a") as f:
+        f.write("\n\ndef test_user_sees_prices_as_of_the_shop_day(shop_today):\n    assert shop_today == '2026-09-19'\n")
+
+    result = repo.bft("red-on-base", "--base", "main", "--command", PYTEST_RUNNER)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ("red      tests/test_price.py::test_user_sees_prices_as_of_the_shop_day  "
+            "(the test setup fails to load on base)") in result.stdout
+
+
+def test_user_can_lend_an_ignored_file_to_the_base_checkout(repo):
+    """
+    Given tests that need an ignored .env file, which a fresh checkout of the base branch lacks
+    When the user runs red-on-base without --link, and then with --link .env
+    Then the first cannot run the tests and the second can
+    """
+    pricing_repo(repo)
+    repo.write(".gitignore", ".env\n")
+    repo.write(".env", "SHOP=vancouver\n")
+    with open(repo.root / "tests/test_price.py", "a") as f:
+        f.write(NEW_TESTS.format(allow="# bft: allow BFT010 -- guards list price for non-members\n"))
+    command = f"test -f .env && {PYTEST_RUNNER}"
+
+    without = repo.bft("red-on-base", "--base", "main", "--command", command)
+    lent = repo.bft("red-on-base", "--base", "main", "--command", command, "--link", ".env")
+
+    assert "NOT RUN" in without.stdout
+    assert lent.returncode == 0, lent.stdout + lent.stderr
+    assert "red      tests/test_price.py::test_user_who_is_a_member_gets_ten_percent_off" in lent.stdout
+    assert (repo.root / ".env").read_text() == "SHOP=vancouver\n"
+
+
 def test_user_can_mark_a_characterization_test_that_is_meant_to_pass_on_base(repo):
     """
     Given the same branch, where the old-behavior test is marked as pinning existing behavior

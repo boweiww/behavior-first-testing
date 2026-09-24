@@ -818,8 +818,8 @@ def _file_failed_to_load(rel: str, cases: List[JCase]) -> bool:
     return False
 
 
-def _links(root: Path, rob: dict) -> List[str]:
-    names = list(rob.get("link") or [])
+def _links(root: Path, rob: dict, extra: Optional[List[str]] = None) -> List[str]:
+    names = list(rob.get("link") or []) + list(extra or [])
     for cand in (".venv", "venv", "node_modules"):
         for p in [root / cand, *sorted(root.glob(f"*/{cand}"))]:
             if p.is_dir():
@@ -877,6 +877,7 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
     tmp = Path(tempfile.mkdtemp(prefix="bft-base-"))
     worktree = tmp / "base"
     cases: List[JCase] = []
+    setup_failed: Set[str] = set()
     failures_to_show: List[str] = []
     made_links: List[Path] = []
     git(root, "worktree", "add", "--detach", "--quiet", str(worktree), merge_base)
@@ -885,12 +886,12 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
             dest = worktree / f
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(root / f, dest)
-        for link in _links(root, rob):
+        for link in _links(root, rob, args.link):
             dest = worktree / link
             if dest.exists() or dest.is_symlink():
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.symlink_to((root / link).resolve(), target_is_directory=True)
+            dest.symlink_to((root / link).resolve(), target_is_directory=(root / link).is_dir())
             made_links.append(dest)
         print(f"bft red-on-base: running {len(new)} new test(s) against {base_ref} ({merge_base[:9]})",
               file=sys.stderr)
@@ -902,8 +903,13 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
                    .replace("{junit}", shlex.quote(str(junit))))
             proc = subprocess.run(cmd, shell=True, cwd=worktree / runner.get("cwd", "."), capture_output=True,
                                   text=True, env={**os.environ, "BFT_RED_ON_BASE": "1"})
+            output = proc.stdout + proc.stderr
             if junit.exists():
                 cases += parse_junit(junit)
+            elif re.search(r"Error while loading conftest", output):
+                # pytest aborts before writing a report when a conftest cannot be imported on base
+                # (it uses something the branch adds): every new test behind it fails there.
+                setup_failed.update(files)
             else:
                 tail = (proc.stdout + proc.stderr).strip().splitlines()[-25:]
                 failures_to_show.append(f"runner `{runner['name']}` wrote no JUnit XML (exit {proc.returncode}). "
@@ -924,7 +930,9 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
         hits = [] if rel in unassigned else _cases_for(rel, t, cases)
         statuses = {c.status for c in hits}
         label = f"{rel}::{t.name}" if kind_of(rel) == "py" else f"{rel} :: {t.title}"
-        if not hits and rel not in unassigned and _file_failed_to_load(rel, cases):
+        if rel in setup_failed:
+            print(f"  red      {label}  (the test setup fails to load on base)")
+        elif not hits and rel not in unassigned and _file_failed_to_load(rel, cases):
             print(f"  red      {label}  (the file fails to load on base)")
         elif not hits or statuses == {"skipped"}:
             not_run += 1
@@ -1213,6 +1221,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     s.add_argument("--base", metavar="REF")
     s.add_argument("--command", help="runner command with {files} and {junit} placeholders")
     s.add_argument("--cwd", help="directory for --command, relative to the repository root")
+    s.add_argument("--link", action="append", default=[], metavar="PATH",
+                   help="also lend this path (e.g. an ignored .env) from your checkout to the base checkout; repeatable")
     s.add_argument("--allow-not-run", action="store_true", help="do not fail when a new test could not be run")
     s = sub.add_parser("gaps", help="uncovered lines and branches from a Cobertura coverage.xml")
     s.add_argument("coverage_xml")

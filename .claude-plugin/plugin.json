@@ -1,7 +1,7 @@
 {
   "name": "behavior-first-testing",
   "displayName": "Behavior-First Testing",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Behavior-first testing for business applications: approved Given/When/Then scenarios before code, no mocks, end-to-end by default, explained coverage gaps, and a linter that enforces it.",
   "author": {
     "name": "Bowei",
