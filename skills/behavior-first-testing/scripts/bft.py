@@ -482,6 +482,7 @@ def actor_ok(t: TestCase, kind: str, actors: List[str]) -> bool:
 
 MOCK_MODULES = ("unittest.mock", "mock", "pytest_mock", "asynctest", "flexmock", "doublex")
 HTTP_STUB_MODULES = ("responses", "respx", "requests_mock", "httpretty", "aioresponses", "pook")
+HTTP_STUB_CALLS = {"httpx.MockTransport"}
 SLEEPS = {"time.sleep"}
 ASYNC_SLEEPS = {"asyncio.sleep", "trio.sleep", "anyio.sleep", "gevent.sleep"}
 CLOCKS = {
@@ -584,6 +585,8 @@ def check_py(rel: str, text: str, lines: List[str], scenario: bool, actors: List
                 add(node.lineno, "BFT002", "sleep", q)
             elif q in CLOCKS:
                 add(node.lineno, "BFT003", "clock", q)
+            elif q in HTTP_STUB_CALLS:
+                add(node.lineno, "BFT001", "http", q)
             elif q.endswith("monkeypatch.setattr") or q.endswith("monkeypatch.delattr"):
                 target = ast.unparse(node.args[0]) if node.args and hasattr(ast, "unparse") else "an attribute"
                 add(node.lineno, "BFT001", "patch", target)
@@ -803,6 +806,18 @@ def _cases_for(rel: str, t: TestCase, cases: List[JCase]) -> List[JCase]:
     return hits
 
 
+def _file_failed_to_load(rel: str, cases: List[JCase]) -> bool:
+    """pytest reports a module that cannot be imported as one failed case named after the module."""
+    stem = Path(rel).with_suffix("").as_posix()
+    for c in cases:
+        if c.status != "failed" or not c.name:
+            continue
+        name = c.name.replace("\\", "/")
+        if name.endswith(Path(rel).name) or ("." in name and stem.endswith(name.replace(".", "/"))):
+            return True
+    return False
+
+
 def _links(root: Path, rob: dict) -> List[str]:
     names = list(rob.get("link") or [])
     for cand in (".venv", "venv", "node_modules"):
@@ -909,9 +924,13 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
         hits = [] if rel in unassigned else _cases_for(rel, t, cases)
         statuses = {c.status for c in hits}
         label = f"{rel}::{t.name}" if kind_of(rel) == "py" else f"{rel} :: {t.title}"
-        if not hits or statuses == {"skipped"}:
+        if not hits and rel not in unassigned and _file_failed_to_load(rel, cases):
+            print(f"  red      {label}  (the file fails to load on base)")
+        elif not hits or statuses == {"skipped"}:
             not_run += 1
-            why = "no runner matches this file" if rel in unassigned else "not in the JUnit report, or skipped"
+            why = ("no runner matches this file" if rel in unassigned else
+                   "not in the JUnit report, or skipped; with pytest, pass --continue-on-collection-errors so one "
+                   "file that cannot load on base does not stop the others")
             print(f"  NOT RUN  {label}  ({why})")
         elif "failed" in statuses:
             print(f"  red      {label}")
@@ -923,10 +942,11 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
                 passes += 1
                 print(f"  PASSES   {label}  (already passes on base; it does not pin the new behavior: BFT010)")
     if passes or (not_run and not args.allow_not_run):
-        print("\nA new test must fail before the change and pass after it. A test that already passes on the base "
-              "branch was written to fit the code, or tests behavior that already existed. If it pins existing "
-              "behavior on purpose (a characterization test before a refactor), mark it: "
-              "`bft: allow BFT010 -- <reason>`.", file=sys.stderr)
+        print("\nA test for the new behavior must fail before the change and pass after it. A test that already "
+              "passes on the base branch either was written to fit the code, or guards behavior the change must "
+              "not alter: an exception or boundary of the new rule (\"a voided cheque can still be re-entered\"), "
+              "or a characterization test before a refactor. Guards are welcome; mark each one so a reviewer sees "
+              "it is deliberate: `bft: allow BFT010 -- <what it guards>`.", file=sys.stderr)
         return 1
     return 0
 
@@ -1132,7 +1152,8 @@ def _detect_runners(root: Path) -> List[Tuple[str, str, str]]:
                 or (d / "tests" / "conftest.py").exists():
             python = ".venv/bin/python" if (d / ".venv" / "bin" / "python").exists() else "python"
             found.append((rel, json.dumps(glob),
-                          f"{python} -m pytest {{files}} -q -p no:cacheprovider --junitxml={{junit}}"))
+                          f"{python} -m pytest {{files}} -q -p no:cacheprovider --continue-on-collection-errors "
+                          f"--junitxml={{junit}}"))
         package = read_text(d / "package.json") or ""
         if '"vitest"' in package:
             found.append((rel, json.dumps(glob), "npx vitest run {files} --reporter=junit --outputFile={junit}"))
@@ -1168,7 +1189,8 @@ def cmd_init(args, root: Path, cfg: dict) -> int:
         runners += f"\n[red_on_base.runners.{name}]\nglobs = {globs}\ncwd = \"{rel}\"\ncommand = \"{command}\"\n"
     if not runners:
         runners = ("\n# [red_on_base.runners.backend]\n# globs = [\"backend/**\"]\n# cwd = \"backend\"\n"
-                   "# command = \".venv/bin/python -m pytest {files} -q -p no:cacheprovider --junitxml={junit}\"\n")
+                   "# command = \".venv/bin/python -m pytest {files} -q -p no:cacheprovider "
+                   "--continue-on-collection-errors --junitxml={junit}\"\n")
     body = INIT_TEMPLATE.format(
         test_globs=json.dumps(DEFAULTS["test_globs"]), scenario_globs=json.dumps(DEFAULTS["scenario_globs"]),
         source_globs=json.dumps(DEFAULTS["source_globs"]), exclude_globs=json.dumps(DEFAULTS["exclude_globs"]),

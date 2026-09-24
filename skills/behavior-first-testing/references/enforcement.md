@@ -41,9 +41,10 @@ fixed when touched.
 2. It checks out the merge-base in a temporary `git worktree`, copies the changed test and support files in, and
    symlinks `.venv`, `venv` and `node_modules` directories (and anything listed in `link`) from your checkout.
 3. It runs each runner's command on the new test files and reads the JUnit XML it writes.
-4. Every new test must fail there. A test that passes is reported as BFT010, unless an allowance marks it as a
-   deliberate characterization test. A test that could not run fails the check too, unless `--allow-not-run` is
-   given.
+4. A test for the new behavior must fail there. A file that cannot load on base (it imports something the branch
+   adds) counts as failing. A test that passes is reported as BFT010, unless an allowance marks it as a guard:
+   an exception or boundary of the new rule, or a characterization test. A test that could not run fails the
+   check too, unless `--allow-not-run` is given.
 
 Your working tree is never modified, and the worktree is removed afterwards.
 
@@ -77,7 +78,7 @@ copy_globs = []      # extra changed files to copy into the base checkout
 [red_on_base.runners.backend]
 globs = ["backend/**"]
 cwd = "backend"
-command = ".venv/bin/python -m pytest {files} -q -p no:cacheprovider --junitxml={junit}"
+command = ".venv/bin/python -m pytest {files} -q -p no:cacheprovider --continue-on-collection-errors --junitxml={junit}"
 
 [red_on_base.runners.frontend]
 globs = ["frontend/**"]
@@ -86,6 +87,8 @@ command = "npx vitest run {files} --reporter=junit --outputFile={junit}"
 ```
 
 `{files}` becomes the new test files (absolute paths inside the base checkout). `{junit}` becomes the report path.
+Keep `--continue-on-collection-errors` for pytest: a new test file that imports something only the branch adds
+cannot load on base, and without the flag pytest stops before running the other files.
 For Playwright use `PLAYWRIGHT_JUNIT_OUTPUT_NAME={junit} npx playwright test {files} --reporter=junit`. For Jest
 use `JEST_JUNIT_OUTPUT_FILE={junit} npx jest {files} --reporters=jest-junit` (needs `jest-junit`).
 

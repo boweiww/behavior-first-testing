@@ -125,7 +125,7 @@ mechanically:
 
 | Rule | Catches |
 |---|---|
-| BFT001 | mocks: `unittest.mock`, `mocker`, `monkeypatch.setattr`, HTTP stub libraries, `vi.mock`/`jest.mock`/`vi.fn`/`spyOn`, `sinon`, `nock`, `msw`, Playwright `page.route` |
+| BFT001 | mocks: `unittest.mock`, `mocker`, `monkeypatch.setattr`, HTTP stubs (`responses`, `respx`, `httpx.MockTransport`), `vi.mock`/`jest.mock`/`vi.fn`/`spyOn`, `sinon`, `nock`, `msw`, Playwright `page.route` |
 | BFT002 | sleeps: `time.sleep`, `asyncio.sleep(n)`, `setTimeout`, `waitForTimeout`, `cy.wait(ms)` |
 | BFT003 | reading the real clock in tests: `datetime.now()`, `date.today()`, `Date.now()`, `new Date()` |
 | BFT004 | call assertions: `assert_called*`, `call_count`, `toHaveBeenCalled*`, `.mock.calls` |
@@ -133,7 +133,7 @@ mechanically:
 | BFT006 | a scenario without Given, When and Then, in that order |
 | BFT007 | skipped or focused tests (`skip`, `skipif`, `xfail`, `.only`, `.skip`, `fixme`) |
 | BFT008 | coverage exclusions (`pragma: no cover`, `istanbul`/`c8`/`v8 ignore`) without a reason |
-| BFT010 | a new test that already passes on the base branch (`red-on-base`) |
+| BFT010 | a new test that already passes on the base branch, unless marked as a guard (`red-on-base`) |
 
 Commands (run from the repository root):
 
@@ -145,9 +145,13 @@ python3 <skill-dir>/scripts/bft.py gaps coverage.xml [--fail-under 90]   # expla
 python3 <skill-dir>/scripts/bft.py init                                  # starter .behavior-testing.toml
 ```
 
-`red-on-base` enforces rule 2 mechanically. It runs the branch's new tests against the base branch's code, where
-each one must fail. A new test that already passes there was fitted to the code, or tests behavior that already
-existed.
+`red-on-base` enforces rule 2 mechanically. It runs the branch's new tests against the base branch's code. A test
+for the new behavior must fail there; if it passes, it was fitted to the code. Some new tests pass on base by
+design: *guards* for what the change must not alter, such as an exception to the new rule ("a voided cheque can
+still be re-entered"), a boundary ("another customer may reuse the number"), or a characterization test before a
+refactor. Write guards; they catch a rule that bites too hard. Mark each one with
+`bft: allow BFT010 -- guards <what>` so a reviewer can tell a guard from a test fitted to the code. A test file
+that cannot even load on base, because it imports something the branch adds, counts as failing there.
 
 When a rule genuinely does not apply, allow it on that line with a reason a reviewer can judge:
 `# bft: allow BFT002 -- polling interval inside wait_until(); the wait ends on the condition`. An allowance

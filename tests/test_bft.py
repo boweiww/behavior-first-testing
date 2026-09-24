@@ -13,7 +13,8 @@ import pytest
 
 BFT = Path(__file__).resolve().parents[1] / "skills" / "behavior-first-testing" / "scripts" / "bft.py"
 PYTHON = os.environ.get("BFT_PYTHON", sys.executable)
-PYTEST_RUNNER = f"{sys.executable} -m pytest {{files}} -q -p no:cacheprovider --junitxml={{junit}}"
+PYTEST_RUNNER = (f"{sys.executable} -m pytest {{files}} -q -p no:cacheprovider --continue-on-collection-errors "
+                 f"--junitxml={{junit}}")
 
 
 class Repo:
@@ -71,6 +72,27 @@ def test_user_is_told_when_a_test_mocks_a_dependency(repo):
     assert result.returncode == 1
     assert rules_reported(result) == ["BFT001", "BFT001", "BFT001"]
     assert "patches `'app.gateway.charge'`" in result.stdout
+
+
+def test_user_is_told_when_a_test_stubs_http_with_an_httpx_transport(repo):
+    """
+    Given a test that answers HTTP calls with httpx's MockTransport, imported both ways
+    When the user runs the lint
+    Then both are reported as BFT001: canned HTTP answers are an unverified fake
+    """
+    repo.write("tests/test_sms.py", """
+        import httpx
+        from httpx import MockTransport
+
+        def test_x():
+            one = httpx.MockTransport(lambda request: httpx.Response(201))
+            two = MockTransport(lambda request: httpx.Response(400))
+    """)
+
+    result = repo.bft("lint")
+
+    assert rules_reported(result) == ["BFT001", "BFT001"]
+    assert "stubs HTTP with `httpx.MockTransport`" in result.stdout
 
 
 def test_user_can_assert_on_what_a_fake_recorded(repo):
@@ -480,6 +502,36 @@ def test_user_is_told_when_a_new_test_already_passes_on_the_base_branch(repo):
     assert "red      tests/test_price.py::test_user_who_is_a_member_gets_ten_percent_off" in result.stdout
     assert "PASSES   tests/test_price.py::test_user_who_is_not_a_member_pays_the_list_price" in result.stdout
     assert "test_user_pays_the_list_price" not in result.stdout
+
+
+def test_user_sees_new_tests_in_a_file_that_cannot_load_on_base_as_red(repo):
+    """
+    Given a branch that adds a module, a new test file importing it, and new tests in an existing file
+    When the user runs red-on-base with pytest told to continue past collection errors
+    Then the new file's tests count as red because it cannot load on base, and the other file still runs
+    """
+    pricing_repo(repo)
+    repo.write("rounding.py", "def to_nickel(cents):\n    return (cents + 2) // 5 * 5\n")
+    repo.write("tests/test_rounding.py", """
+        from rounding import to_nickel
+
+        def test_user_paying_cash_is_rounded_to_the_nickel():
+            assert to_nickel(1002) == 1000
+
+        def test_user_paying_cash_is_rounded_up_from_three_cents():
+            assert to_nickel(1003) == 1005
+    """)
+
+    with open(repo.root / "tests/test_price.py", "a") as f:
+        f.write(NEW_TESTS.format(allow="# bft: allow BFT010 -- guards list price for non-members\n"))
+
+    result = repo.bft("red-on-base", "--base", "main", "--command", PYTEST_RUNNER)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ("red      tests/test_rounding.py::test_user_paying_cash_is_rounded_to_the_nickel  "
+            "(the file fails to load on base)") in result.stdout
+    assert "red      tests/test_price.py::test_user_who_is_a_member_gets_ten_percent_off" in result.stdout
+    assert "NOT RUN" not in result.stdout
 
 
 def test_user_can_mark_a_characterization_test_that_is_meant_to_pass_on_base(repo):

@@ -84,14 +84,14 @@ setup and hook installation without the plugin.
 |---|---|
 | `lint [--changed-since REF]` | Checks the rules below. `--changed-since` lints only what a branch touched, which is how an existing codebase adopts the rules |
 | `scenarios` | Prints every scenario with its Given/When/Then as Markdown, for a PM to review |
-| `red-on-base` | Runs the branch's *new* tests against the base branch in a temporary worktree. Each must fail there; a test that already passes was fitted to the code |
+| `red-on-base` | Runs the branch's *new* tests against the base branch in a temporary worktree. Tests for the new behavior must fail there; a test that already passes was fitted to the code, unless it is marked as a guard for behavior that must not change |
 | `gaps coverage.xml` | Turns a Cobertura report into a table of untested branches, failure paths first, each waiting for a reason |
 | `guard` | Claude Code PreToolUse hook: blocks edits to committed scenarios, allows adding new ones |
 | `init` | Writes a starter config |
 
 | Rule | Catches |
 |---|---|
-| BFT001 | mocks: `unittest.mock`, `mocker`, `monkeypatch.setattr`, HTTP stub libraries, `vi.mock`/`jest.mock`/`vi.fn`/`spyOn`, `sinon`, `nock`, `msw`, Playwright `page.route` |
+| BFT001 | mocks: `unittest.mock`, `mocker`, `monkeypatch.setattr`, HTTP stubs (`responses`, `respx`, `httpx.MockTransport`), `vi.mock`/`jest.mock`/`vi.fn`/`spyOn`, `sinon`, `nock`, `msw`, Playwright `page.route` |
 | BFT002 | sleeps: `time.sleep`, `asyncio.sleep(n)`, `setTimeout`, `waitForTimeout`, `cy.wait(ms)` |
 | BFT003 | the real clock in tests: `datetime.now()`, `date.today()`, `Date.now()`, `new Date()` |
 | BFT004 | call assertions: `assert_called*`, `call_count`, `toHaveBeenCalled*`, `.mock.calls` |
@@ -99,7 +99,7 @@ setup and hook installation without the plugin.
 | BFT006 | a scenario without Given, When and Then, in order |
 | BFT007 | skipped or focused tests |
 | BFT008 | coverage exclusions without a reason |
-| BFT010 | a new test that already passes on the base branch |
+| BFT010 | a new test that already passes on the base branch, unless marked as a guard |
 
 When a rule genuinely doesn't apply, allow it with a reason a reviewer can judge:
 
