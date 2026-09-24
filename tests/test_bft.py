@@ -582,6 +582,36 @@ def test_user_can_lend_an_ignored_file_to_the_base_checkout(repo):
     assert (repo.root / ".env").read_text() == "SHOP=vancouver\n"
 
 
+def test_user_can_tell_tests_that_pin_changed_behavior_from_tests_of_new_code_alone(repo):
+    """
+    Given a branch that changes pricing and adds a rounding module, with a new test for each
+    When the user runs red-on-base with --with-new-files
+    Then the pricing test fails on its own assertion even with the new module present (strong evidence),
+      and the rounding test fails only while the module is missing (it tests the new code on its own)
+    """
+    pricing_repo(repo)
+    repo.write("rounding.py", "def to_nickel(cents):\n    return (cents + 2) // 5 * 5\n")
+    repo.write("tests/test_rounding.py", """
+        from rounding import to_nickel
+
+        def test_user_paying_cash_is_rounded_to_the_nickel():
+            assert to_nickel(1002) == 1000
+    """)
+    with open(repo.root / "tests/test_price.py", "a") as f:
+        f.write(NEW_TESTS.format(allow="# bft: allow BFT010 -- guards list price for non-members\n"))
+
+    plain = repo.bft("red-on-base", "--base", "main", "--command", PYTEST_RUNNER)
+    both = repo.bft("red-on-base", "--base", "main", "--command", PYTEST_RUNNER, "--with-new-files")
+
+    assert plain.returncode == both.returncode == 0, both.stdout + both.stderr
+    assert "(fails on its own assertion)" not in plain.stdout
+    assert ("red      tests/test_price.py::test_user_who_is_a_member_gets_ten_percent_off  "
+            "(fails on its own assertion)") in both.stdout
+    assert ("red      tests/test_rounding.py::test_user_paying_cash_is_rounded_to_the_nickel  "
+            "(fails only while the new files are missing: it tests new code on its own)") in both.stdout
+    assert "allowed  tests/test_price.py::test_user_who_is_not_a_member_pays_the_list_price" in both.stdout
+
+
 def test_user_can_mark_a_characterization_test_that_is_meant_to_pass_on_base(repo):
     """
     Given the same branch, where the old-behavior test is marked as pinning existing behavior

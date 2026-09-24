@@ -184,7 +184,9 @@ For native ESLint/ruff rules, pre-commit, CI, the guard hook and CODEOWNERS: `re
    - branch coverage on the affected tests, then `bft.py gaps --changed-since <base>`: add scenarios for failure
      paths that matter, and write reasons for the rest;
    - `bft.py lint --changed-since <base>`;
-   - `bft.py red-on-base` when on a branch.
+   - `bft.py red-on-base --with-new-files` when on a branch. The second run adds the branch's new files to the
+     base checkout, so it can tell a scenario that fails on its own assertion from one that only failed because
+     a new module was missing.
 8. **Report back** in the format below.
 
 Keep the change to what was asked. Setting up enforcement is a separate task: running `bft.py init`, copying

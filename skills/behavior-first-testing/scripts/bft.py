@@ -876,16 +876,12 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
     to_copy = [f for f in changed if (root / f).is_file() and matches(f, copy_globs)]
     tmp = Path(tempfile.mkdtemp(prefix="bft-base-"))
     worktree = tmp / "base"
-    cases: List[JCase] = []
-    setup_failed: Set[str] = set()
-    failures_to_show: List[str] = []
     made_links: List[Path] = []
+    second = None
     git(root, "worktree", "add", "--detach", "--quiet", str(worktree), merge_base)
     try:
         for f in to_copy:
-            dest = worktree / f
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(root / f, dest)
+            _copy_into(root, worktree, f)
         for link in _links(root, rob, args.link):
             dest = worktree / link
             if dest.exists() or dest.is_symlink():
@@ -895,25 +891,13 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
             made_links.append(dest)
         print(f"bft red-on-base: running {len(new)} new test(s) against {base_ref} ({merge_base[:9]})",
               file=sys.stderr)
-        for idx, files in by_runner.items():
-            runner = runners[idx]
-            junit = tmp / f"junit-{idx}.xml"
-            cmd = (runner["command"]
-                   .replace("{files}", " ".join(shlex.quote(str(worktree / f)) for f in files))
-                   .replace("{junit}", shlex.quote(str(junit))))
-            proc = subprocess.run(cmd, shell=True, cwd=worktree / runner.get("cwd", "."), capture_output=True,
-                                  text=True, env={**os.environ, "BFT_RED_ON_BASE": "1"})
-            output = proc.stdout + proc.stderr
-            if junit.exists():
-                cases += parse_junit(junit)
-            elif re.search(r"Error while loading conftest", output):
-                # pytest aborts before writing a report when a conftest cannot be imported on base
-                # (it uses something the branch adds): every new test behind it fails there.
-                setup_failed.update(files)
-            else:
-                tail = (proc.stdout + proc.stderr).strip().splitlines()[-25:]
-                failures_to_show.append(f"runner `{runner['name']}` wrote no JUnit XML (exit {proc.returncode}). "
-                                        f"Command: {cmd}\n    " + "\n    ".join(tail))
+        first = _run_runners(runners, by_runner, worktree, tmp, "base")
+        if args.with_new_files:
+            added = [f for f in added_files(root, merge_base) if f not in to_copy and (root / f).is_file()]
+            for f in added:
+                _copy_into(root, worktree, f)
+            print(f"bft red-on-base: again with the {len(added)} file(s) the branch adds", file=sys.stderr)
+            second = _run_runners(runners, by_runner, worktree, tmp, "new")
     finally:
         for link in made_links:
             link.unlink()
@@ -921,27 +905,25 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
         git(root, "worktree", "prune", check=False)
         shutil.rmtree(tmp, ignore_errors=True)
 
-    for msg in failures_to_show:
+    for msg in first[2]:
         print(f"bft red-on-base: {msg}", file=sys.stderr)
     passes = not_run = 0
     print(f"bft red-on-base: {len(new)} new test(s), run against {base_ref} @ {merge_base[:9]}")
     allowances = {rel: read_allowances(rel, (read_text(root / rel) or "").splitlines()) for rel, _ in new}
     for rel, t in new:
-        hits = [] if rel in unassigned else _cases_for(rel, t, cases)
-        statuses = {c.status for c in hits}
         label = f"{rel}::{t.name}" if kind_of(rel) == "py" else f"{rel} :: {t.title}"
-        if rel in setup_failed:
-            print(f"  red      {label}  (the test setup fails to load on base)")
-        elif not hits and rel not in unassigned and _file_failed_to_load(rel, cases):
-            print(f"  red      {label}  (the file fails to load on base)")
-        elif not hits or statuses == {"skipped"}:
+        kind, note = _classify(rel, t, first[0], first[1], unassigned)
+        if kind == "red":
+            if second is not None:
+                again, _ = _classify(rel, t, second[0], second[1], unassigned)
+                if again == "red":
+                    note = "fails on its own assertion"
+                elif again == "passes":
+                    note = "fails only while the new files are missing: it tests new code on its own"
+            print(f"  red      {label}" + (f"  ({note})" if note else ""))
+        elif kind == "not-run":
             not_run += 1
-            why = ("no runner matches this file" if rel in unassigned else
-                   "not in the JUnit report, or skipped; with pytest, pass --continue-on-collection-errors so one "
-                   "file that cannot load on base does not stop the others")
-            print(f"  NOT RUN  {label}  ({why})")
-        elif "failed" in statuses:
-            print(f"  red      {label}")
+            print(f"  NOT RUN  {label}  ({note})")
         else:
             reason = allowances[rel].reason("BFT010", max(1, t.start - 1), t.line)
             if reason:
@@ -957,6 +939,64 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
               "it is deliberate: `bft: allow BFT010 -- <what it guards>`.", file=sys.stderr)
         return 1
     return 0
+
+
+def added_files(root: Path, merge_base: str) -> List[str]:
+    """Files the branch adds (not ones it modifies): committed, staged, unstaged or untracked."""
+    added = git(root, "diff", "--name-only", "--diff-filter=A", merge_base).splitlines()
+    untracked = git(root, "ls-files", "-o", "--exclude-standard").splitlines()
+    return sorted({f for f in added + untracked if f})
+
+
+def _copy_into(root: Path, worktree: Path, rel: str) -> None:
+    dest = worktree / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(root / rel, dest)
+
+
+def _run_runners(runners: List[dict], by_runner: Dict[int, List[str]], worktree: Path, tmp: Path,
+                 tag: str) -> Tuple[List[JCase], Set[str], List[str]]:
+    cases: List[JCase] = []
+    setup_failed: Set[str] = set()
+    problems: List[str] = []
+    for idx, files in by_runner.items():
+        runner = runners[idx]
+        junit = tmp / f"junit-{tag}-{idx}.xml"
+        cmd = (runner["command"]
+               .replace("{files}", " ".join(shlex.quote(str(worktree / f)) for f in files))
+               .replace("{junit}", shlex.quote(str(junit))))
+        proc = subprocess.run(cmd, shell=True, cwd=worktree / runner.get("cwd", "."), capture_output=True,
+                              text=True, env={**os.environ, "BFT_RED_ON_BASE": "1"})
+        output = proc.stdout + proc.stderr
+        if junit.exists():
+            cases += parse_junit(junit)
+        elif re.search(r"Error while loading conftest", output):
+            # pytest aborts before writing a report when a conftest cannot be imported on base
+            # (it uses something the branch adds): every new test behind it fails there.
+            setup_failed.update(files)
+        else:
+            tail = output.strip().splitlines()[-25:]
+            problems.append(f"runner `{runner['name']}` wrote no JUnit XML (exit {proc.returncode}). "
+                            f"Command: {cmd}\n    " + "\n    ".join(tail))
+    return cases, setup_failed, problems
+
+
+def _classify(rel: str, t: TestCase, cases: List[JCase], setup_failed: Set[str],
+              unassigned: Set[str]) -> Tuple[str, str]:
+    """("red" | "passes" | "not-run", note) for one new test in one run."""
+    if rel in setup_failed:
+        return "red", "the test setup fails to load on base"
+    hits = [] if rel in unassigned else _cases_for(rel, t, cases)
+    statuses = {c.status for c in hits}
+    if not hits and rel not in unassigned and _file_failed_to_load(rel, cases):
+        return "red", "the file fails to load on base"
+    if not hits or statuses == {"skipped"}:
+        return "not-run", ("no runner matches this file" if rel in unassigned else
+                           "not in the JUnit report, or skipped; with pytest, pass --continue-on-collection-errors "
+                           "so one file that cannot load on base does not stop the others")
+    if "failed" in statuses:
+        return "red", ""
+    return "passes", ""
 
 
 IMPORT_RE = re.compile(r"^\s*(?:import\s|from\s+\S+\s+import\s|export\s+\{?.*\bfrom\s)")
@@ -1223,6 +1263,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     s.add_argument("--cwd", help="directory for --command, relative to the repository root")
     s.add_argument("--link", action="append", default=[], metavar="PATH",
                    help="also lend this path (e.g. an ignored .env) from your checkout to the base checkout; repeatable")
+    s.add_argument("--with-new-files", action="store_true",
+                   help="run a second time with the files the branch adds, to tell tests that fail on their own "
+                        "assertions from tests that only fail because a new module is missing")
     s.add_argument("--allow-not-run", action="store_true", help="do not fail when a new test could not be run")
     s = sub.add_parser("gaps", help="uncovered lines and branches from a Cobertura coverage.xml")
     s.add_argument("coverage_xml")

@@ -24,7 +24,7 @@ install. Update the copy deliberately, like any other pinned tool.
 |---|---|---|
 | `lint [PATH...] [--changed-since REF] [--format github]` | Checks BFT001–BFT008 | 1 on any problem |
 | `scenarios [PATH...]` | Prints scenarios as Markdown with Given/When/Then | 0 |
-| `red-on-base [--base REF] [--command CMD] [--link PATH] [--allow-not-run]` | Runs new tests against the base branch in a temporary git worktree; each must fail | 1 if one passes (BFT010) or could not run |
+| `red-on-base [--base REF] [--command CMD] [--link PATH] [--with-new-files] [--allow-not-run]` | Runs new tests against the base branch in a temporary git worktree; each must fail | 1 if one passes (BFT010) or could not run |
 | `gaps COVERAGE_XML [--changed-since REF] [--fail-under PCT]` | Prints the coverage-gap table | 1 when under the bar |
 | `guard` | Claude Code PreToolUse hook (event on stdin) | 2 blocks the edit |
 | `init [--force]` | Writes a starter config with detected test runners | 0 |
@@ -46,6 +46,11 @@ fixed when touched.
    imports something the branch adds) counts as failing, but that is weak evidence; see step 4 of the workflow. A test that passes is reported as BFT010, unless an allowance marks it as a guard:
    an exception or boundary of the new rule, or a characterization test. A test that could not run fails the
    check too, unless `--allow-not-run` is given.
+5. With `--with-new-files`, the tests run a second time with the files the branch adds copied in (new modules,
+   not modifications). A test that still fails is labelled "fails on its own assertion": strong evidence that
+   it depends on the changed behavior. A test that now passes is labelled "fails only while the new files are
+   missing": it tests new code on its own. That is fine for a unit test of a new module, but a scenario should
+   exercise the change to existing code as well.
 
 Your working tree is never modified, and the worktree is removed afterwards.
 
