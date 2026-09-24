@@ -560,6 +560,34 @@ def test_user_sees_new_tests_whose_shared_setup_cannot_load_on_base_as_red(repo)
             "(the test setup fails to load on base)") in result.stdout
 
 
+def test_user_sees_a_marked_guard_as_allowed_once_the_new_setup_can_load(repo):
+    """
+    Given a new conftest that imports a module the branch adds, and a marked guard that uses its fixture
+    When the user runs red-on-base with --with-new-files
+    Then the guard passes once the new files are present and is reported as allowed, with its reason
+    """
+    pricing_repo(repo)
+    repo.write("clock.py", "def today():\n    return '2026-09-19'\n")
+    repo.write("tests/conftest.py", """
+        import pytest
+        from clock import today
+
+        @pytest.fixture
+        def shop_today():
+            return today()
+    """)
+    with open(repo.root / "tests/test_price.py", "a") as f:
+        f.write("\n\n# bft: allow BFT010 -- guards list price, which the new clock must not change\n"
+                "def test_user_pays_list_price_on_the_shop_day(shop_today):\n"
+                "    assert price(100, member=False) == 100\n")
+
+    result = repo.bft("red-on-base", "--base", "main", "--command", PYTEST_RUNNER, "--with-new-files")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert ("allowed  tests/test_price.py::test_user_pays_list_price_on_the_shop_day  (passes once the new files "
+            "are present: guards list price, which the new clock must not change)") in result.stdout
+
+
 def test_user_can_lend_an_ignored_file_to_the_base_checkout(repo):
     """
     Given tests that need an ignored .env file, which a fresh checkout of the base branch lacks

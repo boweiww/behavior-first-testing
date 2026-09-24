@@ -919,6 +919,10 @@ def cmd_red_on_base(args, root: Path, cfg: dict) -> int:
                 if again == "red":
                     note = "fails on its own assertion"
                 elif again == "passes":
+                    reason = allowances[rel].reason("BFT010", max(1, t.start - 1), t.line)
+                    if reason:
+                        print(f"  allowed  {label}  (passes once the new files are present: {reason})")
+                        continue
                     note = "fails only while the new files are missing: it tests new code on its own"
             print(f"  red      {label}" + (f"  ({note})" if note else ""))
         elif kind == "not-run":
