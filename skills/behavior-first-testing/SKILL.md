@@ -221,7 +221,9 @@ When asked to review tests or a PR:
 
 ## Report format
 
-End any task that touched tests with:
+End any task that touched tests with the block below. Before sending, check every claim the report makes about
+behavior against the code or a test that exercises it, especially claims about ordering and edge cases ("always
+shows X"). Where you have not checked, say so.
 
 ```
 Scenarios: <added / changed, by title; who approved them>
