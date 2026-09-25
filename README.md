@@ -118,6 +118,22 @@ bft red-on-base: 2 new test(s), run against origin/main @ 81a6c44dd
   PASSES   backend/tests/test_checkout.py::test_user_paying_by_card_is_charged_to_the_cent  (already passes on base; it does not pin the new behavior: BFT010)
 ```
 
+## Supported stacks
+
+The rules and the workflow apply to any language and framework. Tooling support varies:
+
+| Part | Python | JavaScript / TypeScript | Gherkin `.feature` | Other languages (Go, Java, C#, Ruby, ...) |
+|---|---|---|---|---|
+| Guidance and examples in the references | pytest, FastAPI, SQLAlchemy | Vitest, Jest, Playwright | pytest-bdd, Cucumber, Playwright-BDD | rules apply; no examples yet |
+| `bft.py lint` | full, parsed with Python's `ast` | pattern-based: good coverage, but can miss or misread code inside strings | scenario naming and Given/When/Then | files are skipped |
+| `bft.py scenarios` and the guard hook | yes | yes | yes | no |
+| `bft.py red-on-base` | yes (pytest) | yes, with any runner that writes JUnit XML (Vitest, Playwright, Jest with `jest-junit`) | via the language's runner | no: new tests are not detected |
+| `bft.py gaps` | any tool that writes Cobertura XML: coverage.py, Vitest, Jest/Istanbul, .NET coverlet. Go and JaCoCo reports need converting first (`gocover-cobertura`, `cover2cover`). | | | |
+
+`bft.py` itself needs Python 3.9+ and git, whatever the project's language. It has been exercised end to end on
+a FastAPI + PostgreSQL codebase. The JavaScript/TypeScript paths are covered by its own tests but have not yet
+been run on a real TypeScript project, so reports and pull requests from TS users are especially welcome.
+
 ## FAQ
 
 **No mocks at all?** Nothing you own gets mocked: no databases, caches, queues or your own modules. External
